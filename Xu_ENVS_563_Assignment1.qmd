@@ -1,0 +1,152 @@
+---
+title: ""
+toc: true
+format: 
+  html:
+    html-math-method: katex
+    code-tools: false
+    self-contained: true
+    embed-resources: true
+editor: visual
+execute: 
+  warning: false
+---
+
+# Installing Packages
+
+```{r}
+library(R.utils)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(tmap)
+library(viridis)
+library(RColorBrewer)
+library(raster)
+library(terra)
+library(exactextractr)
+library(tidyterra)
+library(units)
+```
+
+# Your Annotated Code
+
+```{r}
+
+# Load data
+World_GPW_2020 <- rast(filePath(getwd(), "data/GPW/gpw-v4-population-count-rev11_2020_2pt5_min_tif/gpw_v4_population_count_rev11_2020_2pt5_min.tif"))
+World_GPW_2010 <- rast(filePath(getwd(),"data/GPW/gpw-v4-population-count-rev11_2010_2pt5_min_tif/gpw_v4_population_count_rev11_2010_2pt5_min.tif"))
+China_GADM <- read_sf(filePath(getwd(), "data/GADM/gadm36_CHN_2.shp"))
+
+# Data processing
+China_GPW_2020 <- crop(World_GPW_2020, extent(China_GADM))
+China_GPW_2010 <- crop(World_GPW_2010, extent(China_GADM))
+China_GPW_2020_mask <- mask(China_GPW_2020, China_GADM)
+China_GPW_2010_mask <- mask(China_GPW_2010, China_GADM)
+
+# Begin map 1
+# Extract and join the data 
+China_GPW_2020_extract <- raster::extract(China_GPW_2020_mask, China_GADM, fun=sum, na.rm=TRUE)
+China_GPW_2010_extract <- raster::extract(China_GPW_2010_mask, China_GADM, fun=sum, na.rm=TRUE)
+China_GADM$Population_2020 <- China_GPW_2020_extract$gpw_v4_population_count_rev11_2020_2pt5_min
+China_GADM$Population_2010 <- China_GPW_2010_extract$gpw_v4_population_count_rev11_2010_2pt5_min
+China_GADM$population_change <- China_GADM$Population_2020 - China_GADM$Population_2010
+
+# Calculate the density and set unit
+China_GADM$Area <- st_area(China_GADM) %>% units::set_units(km^2)
+China_GADM$Density_2020 <- China_GADM$Population_2020 / China_GADM$Area
+China_GADM$Density_2010 <- China_GADM$Population_2010 / China_GADM$Area
+
+# Begin map 2
+# Raster data
+China_GPW_2020 <- raster(China_GPW_2020)
+China_GPW_2010 <- raster(China_GPW_2010)
+
+# Compute change
+overlay_raster <- overlay(China_GPW_2010, China_GPW_2020, fun=function(x,y) y-x)
+overlay_raster_mask <- mask(overlay_raster, China_GADM)
+
+# Reclassify
+standard <- matrix(c(-Inf, 0, 1, 0, 2.5, 2, 2.5, 45, 3, 45, Inf, 4), nrow = 4, ncol = 3, byrow = TRUE)
+Change_mask_sorted <- reclassify(overlay_raster_mask, standard, right = T)
+
+```
+
+# Maps
+
+```{r}
+
+# Display Map 1
+tmap_mode("view")
+tm_shape(China_GADM) +
+  tm_borders() +
+  tm_fill(
+    col = c("Density_2020"), 
+    style = "fixed",
+    palette = "seq",
+    id = "NAME_2", 
+    title = "Population per sq km", 
+    breaks=c(0, 100, 500, 1500, Inf)) +
+  tm_layout(
+    aes.palette = list(seq = "YlGnBu"), 
+    legend.outside = TRUE, 
+    legend.outside.position = "right")
+```
+
+```{R}
+# Display map 2
+custom_palette <- c("#96c8fa", "#fcf1f3", "#f09ca9", "#d42e34")
+tmap_mode("plot")
+tm_shape(Change_mask_sorted) +
+  tm_raster(
+    style = "cat", 
+    labels = c("Decline", "Neutral", "Growth", "High Growth"), 
+    title = "", 
+    palette = custom_palette) +
+  tm_shape(China_GADM) +
+  tm_borders() +
+  tm_layout(
+    main.title = "Population Change in China (2010-2020)", 
+    main.title.position = "center", 
+    main.title.size = 1,
+    main.title.fontface = "bold",
+    frame = FALSE, 
+    aes.palette = list(seq = "YlGnBu"), 
+    legend.outside = FALSE )+
+  tm_scale_bar(text.size = 0.3, color.dark = "#f09ca9", color.light = "#fcf1f3")
+
+```
+
+# Up to 500 words which should address the following questions.
+
+1.  What value is associated with each pixel?
+
+Map 1 does not have a value for a specific pixel but instead represents the population density for a region. Before reclassifying, each pixel in map 2 shows the population change in an area (Almost 7.52 km\^2, calculated by total areas of China / total cells of the map) from 2010 to 2020. After reclassification, each pixel receives a value between 1 and 4 that represents the general population change in that area, i.e., "Decline," "Neutral," "Growth," or "High Growth."
+
+```{r}
+Area_each_pixel <- sum(China_GADM$Area) / ncell(Change_mask_sorted)
+print(Area_each_pixel)
+```
+
+2.  Which CRS are you using? Justify your answer.
+
+I am using WSG 84 in the map 1 and map 2. Following is the proof.
+
+```{r}
+st_crs(China_GADM)
+st_crs(Change_mask_sorted)
+```
+
+3.  What is Map 1 saying about population density in China?
+
+Based on map 1, it is evident that China's population varies across different regions. Generally, the population density increases from the west to the east. In the western areas, the population density in most regions is less than 100 people per km\^2. Most places in the middle fall in the range of 100 to 500 people per km\^2. The population density is above 500, mainly on the east coast. Some even have a population density of above 1500.
+
+4.  Which categorical divisions (Decline, Neutral, Growth and High Growth) did you chose for Map 2 and why?
+
+Based on the summary provided below, we can observe that 25% of the data falls below 0, 50% of the data falls below 2.40, and 75% of the data falls below 45.26. To categorize the data, I use the 1st Quartile, Median, and the 3rd Quartile, which will make the map more clear and hierarchical. Additionally, I use blue as a contrasting colour to make it easier to identify the declining areas and red but different shades to indicate different growth rates.
+
+From the generated map, we can see that the south and north-central areas had a high growth in population from 2010 to 2020, while the west and middle of China had a population decline.
+
+```{r}
+summary(overlay_raster_mask)
+```
