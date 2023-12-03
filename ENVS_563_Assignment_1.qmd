@@ -93,7 +93,8 @@ tm_shape(China_GADM) +
     legend.outside.position = "right")
 ```
 
-```{R}
+```{r}
+
 # Display map 2
 custom_palette <- c("#96c8fa", "#fcf1f3", "#f09ca9", "#d42e34")
 tmap_mode("plot")
